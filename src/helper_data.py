@@ -9,6 +9,10 @@ import numpy as np, pandas as pd
 
 import sys
 
+
+
+
+
 def ResizeWithProportions(im, desired_size):
 	'''
 	Take and image and resize it to a square of the desired size.
@@ -46,23 +50,27 @@ def ResizeWithProportions(im, desired_size):
 
 	return new_im, rescaled
 
-def ReduceClasses(datapaths, class_select):
+def ReduceClasses(datapaths, class_select,classifier):
 	print('datapaths:',datapaths)
 	# allClasses = [ name for name in os.listdir(datapaths) if os.path.isdir(os.path.join(datapaths, name)) ]
 	allClasses = list(set([ name for idata in range(len(datapaths)) for name in os.listdir(datapaths[idata]) if os.path.isdir(os.path.join(datapaths[idata], name))]))
 	print('classes from datapaths:', allClasses)
-	if class_select is None:
+    
+    
+	if classifier=='multi':
+		if class_select is None:
+			class_select = allClasses
+		else:
+			if not set(class_select).issubset(allClasses):
+				print('Some of the classes input by the user are not present in the dataset.')
+				print('class_select:',class_select)
+				print('all  classes:',allClasses)
+				raise ValueError
+		return class_select
+	elif classifier=='binary':
+		class_select_binary = class_select
 		class_select = allClasses
-	else:
-		if not set(class_select).issubset(allClasses):
-			print('Some of the classes input by the user are not present in the dataset.')
-			print('class_select:',class_select)
-			print('all  classes:',allClasses)
-			raise ValueError
-	return class_select
-
-
-
+		return class_select,class_select_binary
 
 def LoadMixed(datapaths, L, class_select=None, alsoImages=True, training_data=True):
 	'''
@@ -83,7 +91,7 @@ def LoadMixed(datapaths, L, class_select=None, alsoImages=True, training_data=Tr
 	training_data_dir = '/training_data/' if training_data==True else '/'
 
 	df = pd.DataFrame()
-	class_select=ReduceClasses(datapaths, class_select)	# Decide whether to use all available classes
+	class_select=ReduceClasses(datapaths, class_select,classifier)	# Decide whether to use all available classes
 
 	# Loop for data loading
 	for c in class_select: # Loop over the classes
@@ -143,7 +151,7 @@ def LoadImage(filename, L=None, show=False):
 	return npimage, rescaled
 
 
-def LoadImages(datapaths, L, class_select=None, training_data=True):
+def LoadImages(datapaths, L, class_select=None,classifier=None, training_data=True):
 	'''
 	Uses the data in datapath to create a DataFrame with images only. 
 	This cannot be a particular case of the mixed loading, because the mixed depends on the files written in the features.tsv file, whereas here we fetch the images directly.
@@ -158,35 +166,103 @@ def LoadImages(datapaths, L, class_select=None, training_data=True):
 	'''
 
 	df = pd.DataFrame()
-	class_select=ReduceClasses(datapaths, class_select)	# Decide whether to use all available classes
-
+	dfA = pd.DataFrame()
+	dfB = pd.DataFrame()
+    
 	# The following condition is because the taxonomists used different directory structures
 	names='/training_data/*.jp*g' if training_data==True else '/*.jp*g'
+    
+	if classifier=='multi':    
+
+		class_select=ReduceClasses(datapaths, class_select,classifier)	# Decide whether to use all available classes
+
+		for c in class_select:
+
+			# Get names of images belonging to this class, from all the data paths
+			classImages = []
+			for idp in range(len(datapaths)):
+				classImages.extend( glob.glob(datapaths[idp]+'/'+c+'/'+names) )
+
+			# Create an empty dataframe for this class
+			dfClass=pd.DataFrame(columns=['classname','npimage'])
+
+			print('class: {} ({})'.format(c, len(classImages)))
+
+			for i,imageName in enumerate(classImages):
+
+				npimage,rescaled=LoadImage(imageName,L)
+				dfClass.loc[i] = [c,npimage]
+
+			df=pd.concat([df,dfClass], axis=0)
+
+		df.npimage = df.npimage / 255.0 
+
+		return df.reset_index(drop=True)
 
 
-	for c in class_select:
+	elif classifier=='binary':    
 
-		# Get names of images belonging to this class, from all the data paths
-		classImages = []
-		for idp in range(len(datapaths)):
-			classImages.extend( glob.glob(datapaths[idp]+'/'+c+'/'+names) )
+		class_select,class_select_binary=ReduceClasses(datapaths, class_select,classifier)	# Decide whether to use all available classes
+		class_select = [classes for classes in class_select if classes not in class_select_binary]
 
+        
+		for c in class_select_binary:
+
+			# Get names of images belonging to this class, from all the data paths
+			BinaryclassImages = []
+			for bidp in range(len(datapaths)):
+				BinaryclassImages.extend( glob.glob(datapaths[bidp]+'/'+c+'/'+names) )
+
+			# Create an empty dataframe for this class
+			dfBClass=pd.DataFrame(columns=['classname','npimage'])
+
+			print('class: {} ({})'.format(c, len(BinaryclassImages)))
+
+			for bi,BinaryimageName in enumerate(BinaryclassImages):
+
+				npimage,rescaled=LoadImage(BinaryimageName,L)
+				dfBClass.loc[bi] = [c,npimage]
+
+			dfB=pd.concat([dfB,dfBClass], axis=0)
+
+		dfB.npimage = dfB.npimage / 255.0 
+
+#		return dfB.reset_index(drop=True)
+        
+          
+		concatenated_list = []
+
+		for c in class_select:
+
+			# Get names of images belonging to this class, from all the data paths
+			class_select = [classes for classes in class_select if classes not in class_select_binary]
+            
+			classImages = []
+			for idp in range(len(datapaths)):
+				classImages.extend( glob.glob(datapaths[idp]+'/'+c+'/'+names) )
+
+			random_classImages = np.random.choice(classImages, int(len(classImages)*0.45))
+#			print('45% data of selected class: {} ({})'.format(c, len(random_classImages)))
+			concatenated_list=np.concatenate([concatenated_list,random_classImages])
+			Negative_class = np.random.choice(concatenated_list, len(BinaryclassImages))
+                
+		negative_class_name='Not_' + ''.join(class_select_binary) 
+		print('Negative class: {} ({})'.format(negative_class_name, len(Negative_class)))        
 		# Create an empty dataframe for this class
-		dfClass=pd.DataFrame(columns=['classname','npimage'])
+		dfAClass=pd.DataFrame(columns=['classname','npimage'])
 
-		print('class: {} ({})'.format(c, len(classImages)))
-
-		for i,imageName in enumerate(classImages):
+		for i,imageName in enumerate(Negative_class):
 
 			npimage,rescaled=LoadImage(imageName,L)
-			dfClass.loc[i] = [c,npimage]
+			dfAClass.loc[i] = [negative_class_name,npimage]
 
-		df=pd.concat([df,dfClass], axis=0)
+		dfA=pd.concat([dfA,dfAClass], axis=0)
 
-	df.npimage = df.npimage / 255.0 
+	dfA.npimage = dfA.npimage / 255.0 
+    
+	df=pd.concat([dfB,dfA], axis=0)    # Concatenate Selected class and all other class
 
 	return df.reset_index(drop=True)
-
 
 
 def LoadImageList(im_names, L, show=False):
@@ -205,22 +281,23 @@ def LoadImageList(im_names, L, show=False):
 
 class Cdata:
 
-	def __init__(self, datapath, L=None, class_select=None, kind='mixed', training_data=True):
+	def __init__(self, datapath, L=None, class_select=None,classifier=None, kind='mixed', training_data=True):
 		self.datapath=datapath
 		if L is None and kind!='feat':
 			print('CData: image size needs to be set, unless kind is \'feat\'')
 			raise ValueError
 		self.L=L
 		self.class_select=class_select
+		self.classifier=classifier
 		self.kind=kind
 		self.df=None
 		self.y=None
 		self.X=None
-		self.Load(self.datapath, self.L, self.class_select, self.kind, training_data=training_data)
+		self.Load(self.datapath, self.L, self.class_select, self.classifier, self.kind, training_data=training_data)
 		return
 
 
-	def Load(self, datapaths, L, class_select, kind='mixed', training_data=True):
+	def Load(self, datapaths, L, class_select, classifier, kind='mixed', training_data=True):
 		''' 
 		Loads dataset 
 		For the moment, only mixed data. Later, also pure images or pure features.
@@ -228,33 +305,42 @@ class Cdata:
 		self.L=L
 		self.datapath=datapaths
 		self.class_select=class_select
+		self.classifier=classifier        
 		self.kind=kind
 
 		if kind=='mixed':
-			self.df = LoadMixed(datapaths, L, class_select, alsoImages=True)
+			self.df = LoadMixed(datapaths, L, class_select,classifier, alsoImages=True)
 		elif kind=='feat':
-			self.df = LoadMixed(datapaths, L, class_select, alsoImages=False)
+			self.df = LoadMixed(datapaths, L, class_select,classifier, alsoImages=False)
 		elif kind=='image':
-			self.df = LoadImages(datapaths, L, class_select, training_data=training_data)
+			self.df = LoadImages(datapaths, L, class_select,classifier, training_data=training_data)
 		else:
 			raise NotImplementedError('Only mixed, image or feat data-loading')
 
 		self.classes=self.df['classname'].unique()
+		self.classifier=classifier        
 		self.kind=kind 		# Now the data kind is kind. In most cases, we had already kind=self.kind, but if the user tested another kind, it must be changed
-		self.Check()  		# Some sanity checks on the dataset
+		self.Check(classifier)  		# Some sanity checks on the dataset
 		self.CreateXy()		# Creates X and y, i.e. features and labels
 		return
 
 
-	def Check(self):
+	def Check(self,classifier):
 		''' Basic checks on the dataset '''
 
 		#Number of different classes
 		classes=self.classes
-		if len(classes)<2:
-			print('There are less than 2 classes ({})'.format(len(classes)))
-			raise ValueError
-
+#		print(classes)
+        
+		if classifier=='multi':
+			if len(classes)<2:
+				print('There are less than 2 classes ({})'.format(len(classes)))
+				raise ValueError
+		elif classifier=='binary':
+			if len(classes)>2:
+				print('There are more than 2 classes for binary classifier ({})'.format(len(classes)))
+				raise ValueError                
+                
 		# Columns potentially useful for classification
 		ucols=self.df.drop(columns=['classname','url','filename','file_size','timestamp'], errors='ignore').columns
 		if len(ucols)<1:
@@ -307,6 +393,7 @@ def ReadArgsTxt(modelpath, verbose=False):
 			'layers':[None,None],
 			'datapaths':None,
 			'outpath':None,
+			'classifier':None,
 			'datakind':None,
 			'ttkind':None
 			}
@@ -338,6 +425,8 @@ def ReadArgsTxt(modelpath, verbose=False):
 				params['datakind']=re.search('=\'(.+)\'$',s).group(1)
 			if 'ttkind=' in s:
 				params['ttkind']=re.search('=\'(.+)\'$',s).group(1)
+			if 'classifier=' in s:
+				params['classifier']=re.search('=\'(.+)\'$',s).group(1)
 			if 'class_select=' in s:
 				print('class_select: ',s)
 				temp = re.search('=\[\'(.+)\'\]$',s).group(1)

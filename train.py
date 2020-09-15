@@ -21,7 +21,7 @@
 ###########
 
 import os, sys, pathlib, glob, time, datetime, argparse, numpy as np, pandas as pd
-import keras
+import tensorflow.keras as keras
 from keras.models import Sequential, Model
 from keras.layers import Dense, Conv2D, Flatten, concatenate
 from keras.preprocessing.image import ImageDataGenerator
@@ -82,7 +82,7 @@ class Ctrain:
 		parser.add_argument('-lr', type=float, default=0.00005, help="Learning Rate")
 		parser.add_argument('-aug', action='store_true', help="Perform data augmentation. Augmentation parameters are hard-coded.")
 		parser.add_argument('-modelfile', default=None, help='The name of the file where a model is stored (to be loaded with keras.models.load_model() )')
-		parser.add_argument('-model_image', choices=['mlp','conv2','smallvgg'], default=None, help='For mixed data models, tells what model to use for the image branch. For image models, it is the whole model')
+		parser.add_argument('-model_image', choices=['mlp','conv2','smallvgg','mobile'], default=None, help='For mixed data models, tells what model to use for the image branch. For image models, it is the whole model')
 		parser.add_argument('-model_feat', choices=['mlp'], default=None, help='For mixed data models, tells what model to use for the feature branch. For feat models, it is the whole model.')
 		parser.add_argument('-layers',nargs=2, type=int, default=[256,128], help="Layers for MLP")
 		parser.add_argument('-dropout', type=float, default=None, help="This is a dropout parameter which is passed to the model wrapper but is currently not used (August 2020) because dropouts are currently hardcoded.")
@@ -90,6 +90,7 @@ class Ctrain:
 		parser.add_argument('-L', type=int, default=128, help="Images are resized to a square of LxL pixels")
 		parser.add_argument('-testSplit', type=float, default=0.2, help="Fraction of examples in the test set")
 		parser.add_argument('-class_select', nargs='*', default=None, help='List of classes to be looked at (put the class names one by one, separated by spaces). If None, all available classes are studied.')
+		parser.add_argument('-classifier', choices=['binary','multi'], default='multi', help='Choose "binary class " or "multiclass" classifier')        
 		parser.add_argument('-datakind', choices=['mixed','feat','image'], default=None, help="Which data to load: features, images, or both")
 		parser.add_argument('-ttkind', choices=['mixed','feat','image'], default=None, help="Which data to use in the test and training sets: features, images, or both")
 		parser.add_argument('-training_data', choices=['True','False'], default='True', help="This is to cope with the different directory structures that I was given. Sometimes the class folder has an extra folder inside, called training_data. For the moment, this happens in the training images they gave me, but not with the validation images.")
@@ -202,7 +203,7 @@ class Ctrain:
 
 		return
 
-	def LoadData(self, datapaths=None, L=None, class_select=-1, datakind=None, training_data=True):
+	def LoadData(self, datapaths=None, L=None, class_select=-1,classifier = None, datakind=None, training_data=True):
 		''' 
 		Loads dataset using the function in the Cdata class.
 		Acts differently in case it is the first time or not that the data is loaded
@@ -214,19 +215,21 @@ class Ctrain:
 		if 	   datapaths == None:    datapaths = self.params.datapaths
 		if 			  L == None:             L = self.params.L
 		if class_select == -1: 	  class_select = self.params.class_select # class_select==None has the explicit meaning of selecting all the classes
+		if 	   classifier == None:      classifier = self.params.classifier            
 		if 	   datakind == None:      datakind = self.params.datakind
 		if training_data== None: training_data = self.params.training_data
 
 		# Initialize or Load Data Structure
 		if self.data is None:
-			self.data = hd.Cdata(datapaths, L, class_select, datakind, training_data=training_data)
+			self.data = hd.Cdata(datapaths, L, class_select, classifier, datakind, training_data=training_data)
 		else:
-			self.data.Load(datapaths, L, class_select ,datakind, training_data=training_data)
+			self.data.Load(datapaths, L, class_select, classifier, datakind, training_data=training_data)
 
 		# Reset parameters	
 		self.params.datapaths = self.data.datapath
 		self.params.L        = self.data.L
 		self.params.class_select = self.data.class_select
+		self.params.classifier = self.data.classifier        
 		self.params.datakind = self.data.kind
 
 		return
@@ -263,10 +266,10 @@ class Ctrain:
 
 		# Callbacks
 		checkpointer    = keras.callbacks.ModelCheckpoint(filepath=self.params.outpath+'/bestweights.hdf5', monitor='val_loss', verbose=0, save_best_only=True) # save the model at every epoch in which there is an improvement in test accuracy
-		logger          = keras.callbacks.callbacks.CSVLogger(self.params.outpath+'/epochs.log', separator=' ', append=False)
+		logger          = keras.callbacks.CSVLogger(self.params.outpath+'/epochs.log', separator=' ', append=False)
 		callbacks=[checkpointer, logger]
 		if self.params.earlyStopping>0:
-			earlyStopping   = keras.callbacks.callbacks.EarlyStopping(monitor='val_loss', patience=self.params.earlyStopping, restore_best_weights=True)
+			earlyStopping   = keras.callbacks.EarlyStopping(monitor='val_loss', patience=self.params.earlyStopping, restore_best_weights=True)
 			callbacks.append(earlyStopping)
 
 		self.aug = None if (self.params.aug == False) else ImageDataGenerator(
@@ -281,6 +284,7 @@ class Ctrain:
 									lr 			= self.params.lr,
 									bs 			= self.params.bs,
 									optimizer 	= self.params.opt,
+									classifier 	= self.params.classifier,            
 									totEpochs 	= self.params.totEpochs,
 									dropout 	= self.params.dropout,
 									callbacks 	= callbacks,

@@ -14,8 +14,8 @@ import predict as pr
 #
 # Input parameters (hardcoded, for the moment)
 #
-modelnames	= ['./trained-models/conv2/keras_model.h5']
-weightnames	= ['./trained-models/conv2/bestweights.hdf5']
+modelnames	= ['./trained-models/mobilenet3/keras_model.h5']
+weightnames	= ['./trained-models/mobilenet3/bestweights.hdf5']
 testdirs	= glob.glob('./data/1_zooplankton_0p5x/validation/counts/year_*/*/0000000000_subset_static_html/images/00000/')
 testimages	= glob.glob('./data/1_zooplankton_0p5x/validation/counts/year_*/*/0000000000_subset_static_html/images/00000/*')
 ensMethod	= 'majority'
@@ -37,8 +37,7 @@ print('There are {} images in total'.format(nimages) )
 ensembler=pr.Censemble(modelnames  	= modelnames, 
 						testdirs	= testdirs, 
 						weightnames	= weightnames,
-						screen		= False,
-						training_data=False
+						screen		= False
 						)
 ensembler.MakePredictions()
 ensembler.Ensemble(method=ensMethod, absthres=threshold)
